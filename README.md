@@ -66,9 +66,44 @@ This script performs the following diagnostics:
   when it is missing, disabled, or stopped.
 - Tails the last 50 lines of a log file to help spot runtime errors.
 - Validates that the requested log file exists before attempting to tail it.
+- Can measure latency and packet loss to a target host to validate gaming paths
+  using `--ping-target`, optionally warning when `--latency-warn-ms` or
+  `--loss-warn-percent` thresholds are exceeded.
 - Supports a `--dry-run` flag similar to the installer.
 - Respects the same `FOLKS_SSH_OPTS` environment variable for additional SSH
   flags.
+
+### Latency and stability checks for gamers
+
+If you rely on the router for latency-sensitive gaming, run additional checks
+after deployment:
+
+```bash
+./scripts/router_post_install_check.sh \
+  --host 192.168.1.1 \
+  --package folksd \
+  --service folksd \
+  --log-path /var/log/messages \
+  --ping-target xbox.com \
+  --ping-count 20 \
+  --latency-warn-ms 60 \
+  --loss-warn-percent 1
+```
+
+This will collect packet loss and latency numbers directly from the router.
+Pick a target that mirrors where you play most (for example, `xbox.com`, a
+regional game server hostname, or your VPN/SmartDNS endpoint) and adjust the
+thresholds to match your expectations. A few additional tips:
+
+- For Xbox consoles and high-end gaming PCs, keeping the average latency under
+  60 ms and packet loss below 1% generally maintains an "Open" NAT and smooth
+  online play.
+- For mobile gaming, consider a lower warning threshold (30–40 ms) to catch
+  local Wi-Fi congestion early.
+- Combine these checks with the existing `--service sqm` verification if you
+  use Smart Queue Management to avoid bufferbloat under load.
+- Re-run the command during peak hours after firmware or configuration changes
+  to ensure latency remains stable for every device in your gaming setup.
 
 ## Troubleshooting tips
 

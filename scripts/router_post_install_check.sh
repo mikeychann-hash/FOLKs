@@ -9,6 +9,10 @@ SERVICE_NAME=""
 LOG_PATH=""
 DRY_RUN=false
 SSH_OPTIONS="${FOLKS_SSH_OPTS:-}"
+PING_TARGET=""
+PING_COUNT=10
+LATENCY_WARN_MS=0
+LOSS_WARN_PERCENT=0
 
 usage() {
   cat <<USAGE
@@ -21,6 +25,10 @@ Options:
   -p, --package <name>         Installed package name to verify (required)
   -s, --service <name>         Optional OpenWrt init.d service to check
   -l, --log-path <path>        Optional remote log path to tail (e.g. /var/log/messages)
+  -t, --ping-target <host>     Optional host to ping from the router for latency checks
+  -c, --ping-count <num>       Number of ping probes to send (default: 10)
+      --latency-warn-ms <ms>   Warn if average latency exceeds this threshold (default: disabled)
+      --loss-warn-percent <n>  Warn if packet loss percent exceeds this threshold (default: disabled)
       --dry-run                Print commands without executing them
       --help                   Show this message
 USAGE
@@ -58,6 +66,16 @@ require_cmd() {
   command -v "$cmd" >/dev/null 2>&1 || fail "Required command '$cmd' not found in PATH"
 }
 
+is_positive_integer() {
+  local value="$1"
+  [[ "$value" =~ ^[0-9]+$ ]] && (( value > 0 ))
+}
+
+is_non_negative_integer() {
+  local value="$1"
+  [[ "$value" =~ ^[0-9]+$ ]]
+}
+
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -91,6 +109,26 @@ parse_args() {
           fail "--log-path requires a value"
         fi
         LOG_PATH="$2"; shift 2 ;;
+      -t|--ping-target)
+        if [[ $# -lt 2 ]]; then
+          fail "--ping-target requires a value"
+        fi
+        PING_TARGET="$2"; shift 2 ;;
+      -c|--ping-count)
+        if [[ $# -lt 2 ]]; then
+          fail "--ping-count requires a value"
+        fi
+        PING_COUNT="$2"; shift 2 ;;
+      --latency-warn-ms)
+        if [[ $# -lt 2 ]]; then
+          fail "--latency-warn-ms requires a value"
+        fi
+        LATENCY_WARN_MS="$2"; shift 2 ;;
+      --loss-warn-percent)
+        if [[ $# -lt 2 ]]; then
+          fail "--loss-warn-percent requires a value"
+        fi
+        LOSS_WARN_PERCENT="$2"; shift 2 ;;
       --dry-run)
         DRY_RUN=true; shift ;;
       --help)
@@ -104,6 +142,12 @@ parse_args() {
 validate_inputs() {
   [[ -n "$REMOTE_HOST" ]] || fail "--host is required"
   [[ -n "$PACKAGE_NAME" ]] || fail "--package is required"
+
+  if [[ -n "$PING_TARGET" ]]; then
+    is_positive_integer "$PING_COUNT" || fail "--ping-count must be a positive integer"
+    is_non_negative_integer "$LATENCY_WARN_MS" || fail "--latency-warn-ms must be a non-negative integer"
+    is_non_negative_integer "$LOSS_WARN_PERCENT" || fail "--loss-warn-percent must be a non-negative integer"
+  fi
 }
 
 check_connectivity() {
@@ -151,6 +195,78 @@ fetch_logs() {
   run_remote "$remote_cmd"
 }
 
+run_remote_capture() {
+  local command="$1"
+  local -a ssh_cmd=(ssh -p "$REMOTE_PORT")
+  if [[ -n "$SSH_OPTIONS" ]]; then
+    # shellcheck disable=SC2206
+    ssh_cmd+=($SSH_OPTIONS)
+  fi
+  ssh_cmd+=("$REMOTE_USER@$REMOTE_HOST" "$command")
+
+  if [ "$DRY_RUN" = true ]; then
+    printf 'DRY-RUN: '
+    printf '%q ' "${ssh_cmd[@]}"
+    printf '\n'
+    return 0
+  else
+    "${ssh_cmd[@]}"
+  fi
+}
+
+check_latency() {
+  if [[ -z "$PING_TARGET" ]]; then
+    return
+  fi
+
+  log "Measuring latency to $PING_TARGET ($PING_COUNT probes)"
+  local remote_cmd
+  printf -v remote_cmd 'target=%q; count=%q; if ! command -v ping >/dev/null 2>&1; then echo "ping command not available on router" >&2; exit 1; fi; ping -c "$count" -q "$target"' "$PING_TARGET" "$PING_COUNT"
+
+  if [ "$DRY_RUN" = true ]; then
+    run_remote "$remote_cmd"
+    return
+  fi
+
+  local output
+  if ! output="$(run_remote_capture "$remote_cmd")"; then
+    fail "Latency check failed"
+  fi
+
+  printf '%s\n' "$output"
+
+  local packet_line latency_line avg_latency="" packet_loss=""
+  packet_line="$(printf '%s\n' "$output" | grep -E 'packet loss' || true)"
+  latency_line="$(printf '%s\n' "$output" | grep -E 'round-trip|rtt' || true)"
+
+  if [[ -n "$packet_line" && "$packet_line" =~ ([0-9]+\.?[0-9]*)% ]]; then
+    packet_loss="${BASH_REMATCH[1]}"
+    log "Packet loss to $PING_TARGET: ${packet_loss}%"
+  fi
+
+  if [[ -n "$latency_line" ]]; then
+    local stats="${latency_line#*= }"
+    stats="${stats% ms}"
+    local IFS='/'
+    read -r _ avg_latency _ _ <<< "$stats"
+    if [[ -n "$avg_latency" ]]; then
+      log "Average latency to $PING_TARGET: ${avg_latency} ms"
+    fi
+  fi
+
+  if [[ -n "$avg_latency" ]] && (( LATENCY_WARN_MS > 0 )); then
+    if awk "BEGIN { exit !($avg_latency > $LATENCY_WARN_MS) }"; then
+      log "WARNING: average latency ${avg_latency} ms exceeds ${LATENCY_WARN_MS} ms"
+    fi
+  fi
+
+  if [[ -n "$packet_loss" ]] && (( LOSS_WARN_PERCENT > 0 )); then
+    if awk "BEGIN { exit !($packet_loss > $LOSS_WARN_PERCENT) }"; then
+      log "WARNING: packet loss ${packet_loss}% exceeds ${LOSS_WARN_PERCENT}%"
+    fi
+  fi
+}
+
 main() {
   parse_args "$@"
   validate_inputs
@@ -162,6 +278,7 @@ main() {
   check_package_installed
   check_service
   fetch_logs
+  check_latency
 
   log "Post-installation diagnostics completed"
 }
