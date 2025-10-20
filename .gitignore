@@ -1,0 +1,8 @@
+# Build artifacts
+*.ipk
+*.bin
+*.tar.gz
+
+# Temporary files
+*.swp
+.DS_Store
