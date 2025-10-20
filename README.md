@@ -165,9 +165,10 @@ What the helper does:
   `--revert <archive>` if a radio misbehaves. Use `--backup-dir` to pick a
   different location or `--no-backup` to opt out entirely.
 - Enforces secure WPA2/WPA3 settings on both SSIDs with
-  `--security-profile` (choose `wpa2`, `wpa3`, or `wpa3-transition`) and lets
-  you provide credentials through `--passphrase` or `--passphrase-file`. The
-  helper reuses existing passphrases when safe defaults are not supplied.
+  `--security-profile` (choose `wpa2`, `wpa3`, or `wpa3-transition`). By
+  default the FolksG networks share the passphrase **mikelind**, but you can
+  override it with `--passphrase` or `--passphrase-file` when you need a custom
+  key.
 - Applies latency-focused tuning (WMM QoS, multicast-to-unicast, `noscan`,
   distance reset) and only enables 802.11k/v roaming when the router ships with
   full `wpad`/`hostapd` support. Devices without 80 MHz capability are
@@ -191,9 +192,10 @@ scan entirely with `--no-auto-channel`.
   `--five-g-txpower` to explicitly set the regulatory domain and transmit power.
   Existing values are preserved when the flags are omitted so you can inspect
   them in the logs without forcing a change.
-- **Security hardening:** `--security-profile wpa3-transition --passphrase` is
-  a good balance for mixed device fleets. Supply the passphrase on stdin via
-  `--passphrase-file` to avoid exposing it on the process list.
+- **Security hardening:** `--security-profile wpa3-transition` paired with the
+  default **mikelind** passphrase keeps legacy consoles happy, while
+  `--passphrase` or `--passphrase-file` let you swap in unique credentials
+  without exposing them on the process list.
 - **Latency tuning:** `--no-advanced-optimizations` skips all WMM/roaming
   changes when you simply want to rename SSIDs or update DNS.
 - **Backups and rollback:** pass `--backup-dir /mnt/router-backups` to store the
