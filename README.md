@@ -150,40 +150,62 @@ gaming-friendly defaults over SSH:
 
 What the helper does:
 
-- Renames the 2.4 GHz SSID to **FolksG** and pins it to channel **1**, the
-  cleanest non-DFS option for most North American deployments. Channel 1 keeps
-  your network away from overlapping channel 6/11 chatter common in apartment
-  buildings.
-- Renames the 5 GHz SSID to **FolksG-5G** and locks it to channel **36**, the
-  lowest-latency UNII-1 channel that avoids DFS radar checks so your Xbox,
-  gaming PC, and mobile devices stay connected without mid-match waits.
-- Leaves radio detection automatic but lets you override device/iface sections
-  if your `wireless` UCI layout is customized (use `--two-g-radio`,
-  `--five-g-radio`, `--two-g-iface`, or `--five-g-iface`).
-- Applies latency-focused radio tuning by default: enabling WMM, multicast to
-  unicast conversion, and 802.11k/v roaming assists, while locking the radio
-  distance timer and `noscan` flag to keep wide channel widths under load.
-- Pushes Cloudflare's 1.1.1.1/1.0.0.1 "gamer" DNS resolvers into AdGuard Home
-  so its filtering engine has a fast, privacy-friendly upstream. Pass
-  `--dns-server <ip>` repeatedly to supply your own upstream list.
+- Renames the 2.4 GHz SSID to **FolksG** and automatically scans for the
+  quietest non-DFS channel (1/6/11) using the router's `iwinfo` survey output.
+  If scanning is unavailable it falls back to channel **1** or any value you
+  pass via `--two-g-channel`.
+- Renames the 5 GHz SSID to **FolksG-5G** and picks the least congested
+  non-DFS channel from **36/40/44/48/149/153/157/161/165**. Hardware that
+  cannot scan keeps the requested channel **36** unless you override it.
+- Automatically detects the correct `wifi-device`/`wifi-iface` sections (and
+  radio `phy` names) but still honours `--two-g-radio`, `--five-g-radio`,
+  `--two-g-iface`, and `--five-g-iface` when the layout is non-standard.
+- Creates a timestamped `/tmp/folks_wifi_dns_backup_*.tar.gz` archive before
+  committing changes so you can restore Wi-Fi or AdGuard Home with
+  `--revert <archive>` if a radio misbehaves. Use `--backup-dir` to pick a
+  different location or `--no-backup` to opt out entirely.
+- Enforces secure WPA2/WPA3 settings on both SSIDs with
+  `--security-profile` (choose `wpa2`, `wpa3`, or `wpa3-transition`) and lets
+  you provide credentials through `--passphrase` or `--passphrase-file`. The
+  helper reuses existing passphrases when safe defaults are not supplied.
+- Applies latency-focused tuning (WMM QoS, multicast-to-unicast, `noscan`,
+  distance reset) and only enables 802.11k/v roaming when the router ships with
+  full `wpad`/`hostapd` support. Devices without 80 MHz capability are
+  automatically downgraded to the fastest supported channel width.
+- Configures AdGuard Home with low-latency upstream DNS presets. Cloudflare's
+  1.1.1.1/1.0.0.1 remain the default, but you can switch to `quad9`, `google`,
+  or `opendns`, choose between plaintext/TLS/DoH via `--dns-protocol`, or
+  supply custom servers with `--dns-server`. Optional reachability checks
+  verify each upstream unless `--skip-dns-health-check` is provided.
 - Reloads Wi-Fi and restarts AdGuard Home (when installed) after committing the
   changes to keep downtime to a few seconds.
 
-Add `--dry-run` to preview the SSH commands, or adjust the SSIDs/channels with
-`--two-g-ssid`, `--five-g-ssid`, `--two-g-channel`, and `--five-g-channel` if you
-want to diverge from the defaults described above.
+Add `--dry-run` to preview the SSH commands without touching the router. You
+can still override SSIDs/channels via `--two-g-ssid`, `--five-g-ssid`,
+`--two-g-channel`, and `--five-g-channel`, or disable the background channel
+scan entirely with `--no-auto-channel`.
 
-### Advanced Wi-Fi tuning options
+### Advanced Wi-Fi and DNS options
 
-Need to match a specific regulatory domain or rein in transmit power for a
-crowded environment? Add `--country <code>`, `--two-g-txpower <dBm>`, or
-`--five-g-txpower <dBm>` to enforce those limits while keeping the SSID/channel
-updates intact. The helper will reuse the router's current values when flags are
-omitted so you can observe them in the log output without rewriting anything.
-
-If you'd rather leave the radios untouched apart from SSID/channel/DNS updates,
-include `--no-advanced-optimizations` to skip the roaming/WMM tweaks and retain
-the existing firmware defaults.
+- **Regulatory domain & power:** Use `--country <code>`, `--two-g-txpower`, and
+  `--five-g-txpower` to explicitly set the regulatory domain and transmit power.
+  Existing values are preserved when the flags are omitted so you can inspect
+  them in the logs without forcing a change.
+- **Security hardening:** `--security-profile wpa3-transition --passphrase` is
+  a good balance for mixed device fleets. Supply the passphrase on stdin via
+  `--passphrase-file` to avoid exposing it on the process list.
+- **Latency tuning:** `--no-advanced-optimizations` skips all WMM/roaming
+  changes when you simply want to rename SSIDs or update DNS.
+- **Backups and rollback:** pass `--backup-dir /mnt/router-backups` to store the
+  tarball somewhere persistent, or run `--revert /tmp/folks_wifi_dns_backup_*.tar.gz`
+  to undo the most recent change.
+- **DNS presets:** `--dns-profile quad9 --dns-protocol tls` swaps in
+  privacy-focused TLS resolvers, while `--dns-profile google --dns-protocol https`
+  configures DoH endpoints. Combine `--bootstrap-dns <ip>` with DoH/DoT
+  profiles when you want a specific bootstrap resolver.
+- **Health checks:** leave `--skip-dns-health-check` off to let the script ping
+  plaintext resolvers, perform TLS handshakes, or fetch DoH endpoints before
+  saving the configuration so mis-typed addresses are caught early.
 
 ## Troubleshooting tips
 
