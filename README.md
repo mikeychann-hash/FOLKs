@@ -160,6 +160,9 @@ What the helper does:
 - Leaves radio detection automatic but lets you override device/iface sections
   if your `wireless` UCI layout is customized (use `--two-g-radio`,
   `--five-g-radio`, `--two-g-iface`, or `--five-g-iface`).
+- Applies latency-focused radio tuning by default: enabling WMM, multicast to
+  unicast conversion, and 802.11k/v roaming assists, while locking the radio
+  distance timer and `noscan` flag to keep wide channel widths under load.
 - Pushes Cloudflare's 1.1.1.1/1.0.0.1 "gamer" DNS resolvers into AdGuard Home
   so its filtering engine has a fast, privacy-friendly upstream. Pass
   `--dns-server <ip>` repeatedly to supply your own upstream list.
@@ -169,6 +172,18 @@ What the helper does:
 Add `--dry-run` to preview the SSH commands, or adjust the SSIDs/channels with
 `--two-g-ssid`, `--five-g-ssid`, `--two-g-channel`, and `--five-g-channel` if you
 want to diverge from the defaults described above.
+
+### Advanced Wi-Fi tuning options
+
+Need to match a specific regulatory domain or rein in transmit power for a
+crowded environment? Add `--country <code>`, `--two-g-txpower <dBm>`, or
+`--five-g-txpower <dBm>` to enforce those limits while keeping the SSID/channel
+updates intact. The helper will reuse the router's current values when flags are
+omitted so you can observe them in the log output without rewriting anything.
+
+If you'd rather leave the radios untouched apart from SSID/channel/DNS updates,
+include `--no-advanced-optimizations` to skip the roaming/WMM tweaks and retain
+the existing firmware defaults.
 
 ## Troubleshooting tips
 

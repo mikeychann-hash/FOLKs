@@ -14,6 +14,18 @@ FIVE_G_CHANNEL="36"
 TWO_G_HTMODE="HT20"
 FIVE_G_HTMODE="VHT80"
 
+COUNTRY=""
+COUNTRY_EXPLICIT=false
+TWO_G_TXPOWER=""
+TWO_G_TXPOWER_EXPLICIT=false
+FIVE_G_TXPOWER=""
+FIVE_G_TXPOWER_EXPLICIT=false
+EXISTING_TWO_G_COUNTRY=""
+EXISTING_FIVE_G_COUNTRY=""
+EXISTING_TWO_G_TXPOWER=""
+EXISTING_FIVE_G_TXPOWER=""
+ENABLE_OPTIMIZATIONS=true
+
 TWO_G_RADIO=""
 FIVE_G_RADIO=""
 TWO_G_IFACE=""
@@ -35,6 +47,10 @@ Options:
       --two-g-channel <number>    Non-DFS channel for the 2.4 GHz radio (default: 1)
       --five-g-channel <number>   Non-DFS channel for the 5 GHz radio (default: 36)
       --dns-server <address>      Upstream DNS server for AdGuard Home (repeatable)
+      --country <code>            Two-letter country code to apply to both radios
+      --two-g-txpower <dBm>       Override 2.4 GHz transmit power (integer dBm)
+      --five-g-txpower <dBm>      Override 5 GHz transmit power (integer dBm)
+      --no-advanced-optimizations Skip latency-focused Wi-Fi tuning (leave radios as-is)
       --two-g-radio <name>        Override detected 2.4 GHz wifi-device section
       --five-g-radio <name>       Override detected 5 GHz wifi-device section
       --two-g-iface <name>        Override detected 2.4 GHz wifi-iface section
@@ -129,6 +145,17 @@ parse_args() {
       --dns-server)
         [[ $# -ge 2 ]] || fail "--dns-server requires a value"
         DNS_SERVERS+=("$2"); shift 2 ;;
+      --country)
+        [[ $# -ge 2 ]] || fail "--country requires a value"
+        COUNTRY="$2"; COUNTRY_EXPLICIT=true; shift 2 ;;
+      --two-g-txpower)
+        [[ $# -ge 2 ]] || fail "--two-g-txpower requires a value"
+        TWO_G_TXPOWER="$2"; TWO_G_TXPOWER_EXPLICIT=true; shift 2 ;;
+      --five-g-txpower)
+        [[ $# -ge 2 ]] || fail "--five-g-txpower requires a value"
+        FIVE_G_TXPOWER="$2"; FIVE_G_TXPOWER_EXPLICIT=true; shift 2 ;;
+      --no-advanced-optimizations)
+        ENABLE_OPTIMIZATIONS=false; shift ;;
       --two-g-radio)
         [[ $# -ge 2 ]] || fail "--two-g-radio requires a value"
         TWO_G_RADIO="$2"; shift 2 ;;
@@ -184,12 +211,56 @@ validate_inputs() {
   [[ -n "$REMOTE_HOST" ]] || fail "--host is required"
   validate_channel_inputs
   normalize_dns_servers
+  if [[ -n "$COUNTRY" && ! "$COUNTRY" =~ ^[A-Za-z]{2}$ ]]; then
+    fail "Country code must be a two-letter ISO value"
+  fi
+  if [[ -n "$TWO_G_TXPOWER" && ! "$TWO_G_TXPOWER" =~ ^-?[0-9]+$ ]]; then
+    fail "--two-g-txpower must be an integer"
+  fi
+  if [[ -n "$FIVE_G_TXPOWER" && ! "$FIVE_G_TXPOWER" =~ ^-?[0-9]+$ ]]; then
+    fail "--five-g-txpower must be an integer"
+  fi
 }
 
 require_remote_prerequisites() {
   log "Checking router prerequisites"
   run_remote "command -v uci >/dev/null 2>&1 || { echo 'uci not found on router' >&2; exit 1; }"
   run_remote "command -v wifi >/dev/null 2>&1 || { echo 'wifi helper not found on router' >&2; exit 1; }"
+}
+
+detect_country_and_txpower() {
+  if [ "$DRY_RUN" = true ]; then
+    return
+  fi
+
+  local two_country
+  local five_country
+  local two_power
+  local five_power
+
+  two_country="$(run_remote_capture "uci -q get wireless.${TWO_G_RADIO}.country 2>/dev/null || true" | tr -d '\r')"
+  five_country="$(run_remote_capture "uci -q get wireless.${FIVE_G_RADIO}.country 2>/dev/null || true" | tr -d '\r')"
+  two_power="$(run_remote_capture "uci -q get wireless.${TWO_G_RADIO}.txpower 2>/dev/null || true" | tr -d '\r')"
+  five_power="$(run_remote_capture "uci -q get wireless.${FIVE_G_RADIO}.txpower 2>/dev/null || true" | tr -d '\r')"
+
+  EXISTING_TWO_G_COUNTRY="$two_country"
+  EXISTING_FIVE_G_COUNTRY="$five_country"
+  EXISTING_TWO_G_TXPOWER="$two_power"
+  EXISTING_FIVE_G_TXPOWER="$five_power"
+
+  if [[ -z "$COUNTRY" ]]; then
+    if [[ -n "$two_country" ]]; then
+      COUNTRY="$two_country"
+    elif [[ -n "$five_country" ]]; then
+      COUNTRY="$five_country"
+    fi
+  fi
+  if [[ -z "$TWO_G_TXPOWER" ]]; then
+    TWO_G_TXPOWER="$two_power"
+  fi
+  if [[ -z "$FIVE_G_TXPOWER" ]]; then
+    FIVE_G_TXPOWER="$five_power"
+  fi
 }
 
 detect_radios_and_ifaces() {
@@ -298,8 +369,35 @@ build_configuration_script() {
   commands+=("uci set wireless.${TWO_G_RADIO}.htmode='${TWO_G_HTMODE}'")
   commands+=("uci set wireless.${FIVE_G_RADIO}.channel='${FIVE_G_CHANNEL}'")
   commands+=("uci set wireless.${FIVE_G_RADIO}.htmode='${FIVE_G_HTMODE}'")
+  if [[ -n "$COUNTRY" && (COUNTRY_EXPLICIT || -z "$EXISTING_TWO_G_COUNTRY" || -z "$EXISTING_FIVE_G_COUNTRY") ]]; then
+    local upper_country="${COUNTRY^^}"
+    commands+=("uci set wireless.${TWO_G_RADIO}.country='${upper_country}'")
+    commands+=("uci set wireless.${FIVE_G_RADIO}.country='${upper_country}'")
+  fi
+  if [[ -n "$TWO_G_TXPOWER" && (TWO_G_TXPOWER_EXPLICIT || -z "$EXISTING_TWO_G_TXPOWER") ]]; then
+    commands+=("uci set wireless.${TWO_G_RADIO}.txpower='${TWO_G_TXPOWER}'")
+  fi
+  if [[ -n "$FIVE_G_TXPOWER" && (FIVE_G_TXPOWER_EXPLICIT || -z "$EXISTING_FIVE_G_TXPOWER") ]]; then
+    commands+=("uci set wireless.${FIVE_G_RADIO}.txpower='${FIVE_G_TXPOWER}'")
+  fi
   commands+=("uci set wireless.${TWO_G_IFACE}.ssid='${TWO_G_SSID}'")
   commands+=("uci set wireless.${FIVE_G_IFACE}.ssid='${FIVE_G_SSID}'")
+  if [ "$ENABLE_OPTIMIZATIONS" = true ]; then
+    commands+=("uci set wireless.${TWO_G_RADIO}.noscan='1'")
+    commands+=("uci set wireless.${FIVE_G_RADIO}.noscan='1'")
+    commands+=("uci set wireless.${TWO_G_RADIO}.distance='0'")
+    commands+=("uci set wireless.${FIVE_G_RADIO}.distance='0'")
+    commands+=("uci set wireless.${TWO_G_IFACE}.wmm='1'")
+    commands+=("uci set wireless.${FIVE_G_IFACE}.wmm='1'")
+    commands+=("uci set wireless.${TWO_G_IFACE}.disassoc_low_ack='0'")
+    commands+=("uci set wireless.${FIVE_G_IFACE}.disassoc_low_ack='0'")
+    commands+=("uci set wireless.${TWO_G_IFACE}.multicast_to_unicast='1'")
+    commands+=("uci set wireless.${FIVE_G_IFACE}.multicast_to_unicast='1'")
+    commands+=("uci set wireless.${TWO_G_IFACE}.ieee80211k='1'")
+    commands+=("uci set wireless.${FIVE_G_IFACE}.ieee80211k='1'")
+    commands+=("uci set wireless.${TWO_G_IFACE}.bss_transition='1'")
+    commands+=("uci set wireless.${FIVE_G_IFACE}.bss_transition='1'")
+  fi
   commands+=("uci commit wireless")
 
   local upstream_dns=""
@@ -338,8 +436,38 @@ main() {
   require_remote_prerequisites
   detect_radios_and_ifaces
   check_adguard_presence
+  detect_country_and_txpower
   log "2.4 GHz SSID: $TWO_G_SSID on channel $TWO_G_CHANNEL ($TWO_G_RADIO/$TWO_G_IFACE)"
   log "5 GHz SSID: $FIVE_G_SSID on channel $FIVE_G_CHANNEL ($FIVE_G_RADIO/$FIVE_G_IFACE)"
+  if [[ -n "$COUNTRY" ]]; then
+    local country_note="unchanged"
+    if [[ COUNTRY_EXPLICIT || -z "$EXISTING_TWO_G_COUNTRY" || -z "$EXISTING_FIVE_G_COUNTRY" ]]; then
+      country_note="enforced"
+    fi
+    log "Regulatory domain: ${COUNTRY^^} (${country_note})"
+  fi
+  if [[ -n "$TWO_G_TXPOWER" || -n "$FIVE_G_TXPOWER" ]]; then
+    local two_label="${TWO_G_TXPOWER:-current}"
+    local five_label="${FIVE_G_TXPOWER:-current}"
+    local two_note="unchanged"
+    local five_note="unchanged"
+    if [[ -z "$TWO_G_TXPOWER" ]]; then
+      two_note="current"
+    elif [[ TWO_G_TXPOWER_EXPLICIT || -z "$EXISTING_TWO_G_TXPOWER" ]]; then
+      two_note="set"
+    fi
+    if [[ -z "$FIVE_G_TXPOWER" ]]; then
+      five_note="current"
+    elif [[ FIVE_G_TXPOWER_EXPLICIT || -z "$EXISTING_FIVE_G_TXPOWER" ]]; then
+      five_note="set"
+    fi
+    log "Transmit power - 2.4 GHz: ${two_label} (${two_note}), 5 GHz: ${five_label} (${five_note})"
+  fi
+  if [ "$ENABLE_OPTIMIZATIONS" = true ]; then
+    log "Advanced optimizations: fast roaming, WMM QoS, and multicast-to-unicast enabled"
+  else
+    log "Advanced Wi-Fi optimizations skipped"
+  fi
   if [ "$HAS_ADGUARD" = true ]; then
     log "AdGuard Home upstream DNS servers: ${DNS_SERVERS[*]}"
   else
