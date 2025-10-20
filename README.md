@@ -137,6 +137,39 @@ Run the command again anytime you need to retarget the forwards to a different
 IP—existing rules with the same profile names will be updated instead of
 duplicated.
 
+## Gaming-optimized Wi-Fi and DNS
+
+If your router also hosts your wireless networks, keep the SSIDs and channels
+tidy for latency-sensitive play. `scripts/router_configure_wifi_dns.sh` applies
+gaming-friendly defaults over SSH:
+
+```bash
+./scripts/router_configure_wifi_dns.sh \
+  --host 192.168.1.1
+```
+
+What the helper does:
+
+- Renames the 2.4 GHz SSID to **FolksG** and pins it to channel **1**, the
+  cleanest non-DFS option for most North American deployments. Channel 1 keeps
+  your network away from overlapping channel 6/11 chatter common in apartment
+  buildings.
+- Renames the 5 GHz SSID to **FolksG-5G** and locks it to channel **36**, the
+  lowest-latency UNII-1 channel that avoids DFS radar checks so your Xbox,
+  gaming PC, and mobile devices stay connected without mid-match waits.
+- Leaves radio detection automatic but lets you override device/iface sections
+  if your `wireless` UCI layout is customized (use `--two-g-radio`,
+  `--five-g-radio`, `--two-g-iface`, or `--five-g-iface`).
+- Pushes Cloudflare's 1.1.1.1/1.0.0.1 "gamer" DNS resolvers into AdGuard Home
+  so its filtering engine has a fast, privacy-friendly upstream. Pass
+  `--dns-server <ip>` repeatedly to supply your own upstream list.
+- Reloads Wi-Fi and restarts AdGuard Home (when installed) after committing the
+  changes to keep downtime to a few seconds.
+
+Add `--dry-run` to preview the SSH commands, or adjust the SSIDs/channels with
+`--two-g-ssid`, `--five-g-ssid`, `--two-g-channel`, and `--five-g-channel` if you
+want to diverge from the defaults described above.
+
 ## Troubleshooting tips
 
 - **Authentication failures:** verify you can `ssh` to the router manually and
