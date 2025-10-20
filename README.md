@@ -105,6 +105,38 @@ thresholds to match your expectations. A few additional tips:
 - Re-run the command during peak hours after firmware or configuration changes
   to ensure latency remains stable for every device in your gaming setup.
 
+## Gaming-friendly port forwarding presets
+
+OpenWrt's firewall can expose console or server ports to the internet so your
+friends can join without NAT issues. Automate those redirects with
+`scripts/router_configure_port_forwarding.sh`:
+
+```bash
+./scripts/router_configure_port_forwarding.sh \
+  --host 192.168.1.1 \
+  --lan-ip 192.168.1.50 \
+  --profile xbox \
+  --profile minecraft-java \
+  --profile minecraft-bedrock
+```
+
+The script checks that `uci` and the firewall service are available on the
+router, then adds (or updates) `firewall` redirects targeting the provided LAN
+IP before reloading the firewall. Pass `--dry-run` to preview the commands, or
+`--lan-interface br-lan` if your LAN zone uses a custom name.
+
+Available profiles and their forwarded ports:
+
+| Profile            | Protocol | Ports                  | Description |
+|--------------------|----------|------------------------|-------------|
+| `xbox`             | TCP/UDP  | 53, 80, 88, 500, 3074, 3544, 4500 | Ensures an Open NAT for Xbox consoles. |
+| `minecraft-java`   | TCP      | 25565                  | Default Java Edition server port. |
+| `minecraft-bedrock`| UDP      | 19132, 19133           | Default Bedrock Edition server ports. |
+
+Run the command again anytime you need to retarget the forwards to a different
+IP—existing rules with the same profile names will be updated instead of
+duplicated.
+
 ## Troubleshooting tips
 
 - **Authentication failures:** verify you can `ssh` to the router manually and
